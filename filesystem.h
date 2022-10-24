@@ -11,12 +11,13 @@
 #include <vector>
 #include <algorithm>
 #include <iostream>
-#define FILE 1
+#define F 1
 #define DIR 0
 
 struct File{
     std::string name;
     std::string path;
+    File* parent;
     int type;
     int start;
     int length;
@@ -26,6 +27,37 @@ struct File{
     File(std::string name, std::string path, int type, int start, int length);
     ~File();
 };
+
+File *getParent(std::vector<std::string> &tokenized_path, File *&parent){
+    File* found;
+    for(auto& p : tokenized_path){
+        if(p == ".."){
+            if(parent->parent){
+                parent = parent->parent;
+            }
+            found = parent;
+            continue;
+        }
+        found = nullptr;
+        for(auto& f : parent->children){
+            if(f->name == p){
+                if(f->type == F){
+                    std::cout << p << ": Not a directory\n";
+                    return nullptr;
+                }
+                found = f;
+                break;
+            }
+        }
+        if(found){
+            parent = found;
+        }
+        else{
+            break;
+        }
+    }
+    return found;
+}
 
 File::File(std::string name, std::string path, int type){
     this->name = std::move(name);
@@ -53,11 +85,14 @@ File::~File(){
         delete f;
     }
 }
-std::vector<std::string> tokenize(std::string path){
+std::vector<std::string> tokenize(std::string path, char control){
     std::vector<std::string> tokens;
     std::string s;
+    if(path[0] == '/'){
+        path = path.substr(1, std::string::npos);
+    }
     for(auto& c : path){
-        if(c != '/'){
+        if(c != control){
             s += c;
         }
         else{
@@ -70,63 +105,70 @@ std::vector<std::string> tokenize(std::string path){
 }
 
 
-int add_file(File* f, File* parent, std::string relative_path){
-    std::vector<std::string> tokenized_path = tokenize(relative_path);
+int add_file(std::string path, File* parent, int type, File* to_add){
+    std::vector<std::string> tokenized_path = tokenize(path, '/');
+    std::string name = tokenized_path[tokenized_path.size() - 1];
     tokenized_path.pop_back();
-    File* found = nullptr;
-    for(auto& p : tokenized_path){
-        found = nullptr;
-        for(auto& f : parent->children){
-            if(f->name == p){
-                found = f;
-                break;
-            }
-        }
-        if(found){
-            parent = found;
-        }
-        else{
-            break;
-        }
-    }
-    if(!found){
-        std::cout << "cd: " << f->path << ": No such file or directory\n";
+
+    File* found = getParent(tokenized_path, parent);
+
+    if(!tokenized_path.empty() && !found){
+        std::cout << path << ": No such directory\n";
     }
     else {
-        parent->children.push_back(f);
+        if(std::find_if(parent->children.begin(), parent->children.end(),[name](const File* a){
+            if(a->name == name)
+                return true;
+        }) == parent->children.end()) {
+            if (!to_add)
+                to_add = new File(name, (parent->path == "/" ? "" : parent->path) + "/" + name, type);
+            to_add->parent = parent;
+            parent->children.push_back(to_add);
+        }
+        else{
+            std::cout << "cannot create: " << name << " file already exists\n";
+        }
+
     }
 }
 
 void delete_file(std::string path, File* parent){
-
-}
-
-File* chdir(std::string path, File* parent){
-    std::vector<std::string> tokenized_pth = tokenize(path);
-    File* to_return;
-    for(auto& p : tokenized_pth){
-        to_return = nullptr;
-        for(auto& f : parent->children){
-            if(f->name == p){
-                if(f->type == FILE){
-                    std::cout << p << ": Not a directory\n";
-                    break;
-                }
-                to_return = f;
+    std::vector<std::string> tokenized_path = tokenize(path, '/');
+    std::string name = tokenized_path[tokenized_path.size() - 1];
+    tokenized_path.pop_back();
+    File *found = getParent(tokenized_path, parent);
+    if(!tokenized_path.empty() && !found){
+        std::cout << path << ": No such directory\n";
+    }
+    else {
+        int i;
+        for(i = 0; i < parent->children.size(); ++i){
+            if(parent->children[i]->name == name){
                 break;
             }
         }
-        if(to_return){
-            parent = to_return;
+        if(i == parent->children.size()){
+            std::cout << name << ": No such file\n";
         }
         else{
-            break;
+            File* to_remove = parent->children[i];
+            parent->children.erase(parent->children.begin() + i);
+            delete to_remove;
         }
     }
-    if(!to_return){
-        std::cout << path << ": No such file or directory\n";
+}
+
+
+File* chdir(std::string path, File* parent){
+    std::vector<std::string> tokenized_pth = tokenize(path, '/');
+    File* found = getParent(tokenized_pth, parent);
+
+    if(!found){
+        std::cout << path << ": malformed path\n";
+        return nullptr;
     }
-    return to_return;
+
+    return found;
 }
 
 
