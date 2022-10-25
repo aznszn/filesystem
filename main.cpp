@@ -15,9 +15,9 @@ int main() {
     File* root = new File("root", "/", DIR);
     File* cwd = root;
 
-    ifstream directory_file("directory.txt");
-    create_directory_tree(root, directory_file);
-    directory_file.close();
+    ifstream directory_file_in("directory.txt");
+    create_directory_tree(root, directory_file_in);
+    directory_file_in.close();
 
     cout << "commands list:\n\n"
          << "cd <path>\t\t\tchange current directory\n"
@@ -31,7 +31,7 @@ int main() {
          << "exit\t\t\t\texit program\n\n\n";
 
     string command;
-    while(command != "exit") {
+    while(command != "quit") {
         cout << cwd->path << "> ";
         cin >> command;
         if(command == "cd"){
@@ -51,6 +51,14 @@ int main() {
         }
         else if(command == "rm"){
             rm(root, cwd);
+        }
+        else if(command == "mv"){
+            mv(root, cwd);
+        }
+        else if(command == "quit"){
+            ofstream directory_file_out("directory.txt", ios_base::trunc);
+            serialize(root, directory_file_out);
+            directory_file_out.close();
         }
     }
 }
@@ -103,18 +111,29 @@ void rm(File* root, File* cwd){
     cin >> path;
 
     if(path[0] == '/')
-        delete_file(path, root);
+        delete_file(path, root, cwd);
 
     else
-        delete_file(path, cwd);
+        delete_file(path, cwd, cwd);
 };
 
 void mv(File* root, File* cwd){
-
-    /*string path2;
+    string path2;
+    string path1;
     cin >> path1;
-    cin >> path2;*/
-};
+    cin >> path2;
+
+    File* parent1 = cwd;
+    File* parent2 = cwd;
+    if(path1[0] == '/'){
+        parent1 = root;
+    }
+    if(path2[0] == '/'){
+        parent2 = root;
+    }
+
+    move(path1, path2, parent1, parent2);
+}
 
 
 void touch(File* root, File* cwd);
