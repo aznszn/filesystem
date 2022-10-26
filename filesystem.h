@@ -198,9 +198,17 @@ void move(const string& path1, const string& path2, File* parent1, File* parent2
             cout << name1 << ": No such file\n";
         }
         else{
-            (*it)->path = (parent2->path == "/" ? "" : parent2->path) + "/" + (*it)->name;
-            parent2->children.push_back(*it);
-            parent1->children.erase(it);
+            auto it2 = find_if(parent2->children.begin(), parent2->children.end(), [it](File* f){
+                return (*it)->name == f->name;
+            });
+            if(it2 == parent2->children.end()){
+                (*it)->path = (parent2->path == "/" ? "" : parent2->path) + "/" + (*it)->name;
+                parent2->children.push_back(*it);
+                parent1->children.erase(it);
+            }
+            else{
+                cout << (*it)->name << " already exists in " << path2 << "\n";
+            }
         }
     }
 }
