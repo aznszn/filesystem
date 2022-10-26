@@ -1,11 +1,8 @@
-//
-// Created by aznszn on 10/23/22.
-//
-
 #ifndef FILESYSTEM_FILESYSTEM_H
 #define FILESYSTEM_FILESYSTEM_H
 
 #endif //FILESYSTEM_FILESYSTEM_H
+
 #include <string>
 #include <utility>
 #include <vector>
@@ -14,70 +11,43 @@
 #define F 1
 #define DIR 0
 
+using namespace std;
+
 struct File{
-    std::string name;
-    std::string path;
+    string name;
+    string path;
     File* parent;
     int type;
     int start;
     int length;
-    std::vector<File*> children;
-    std::vector<std::pair<int, int>> extents;
-    File(std::string name, std::string path, int type);
-    File(std::string name, std::string path, int type, int start, int length);
+    vector<File*> children;
+    vector<pair<int, int>> extents;
+    File(string name, string path, int type);
+    File(string name, string path, int type, int start, int length);
     ~File();
 };
 
-File *getFile(std::vector<std::string> &tokenized_path, File *parent){
-    File* found = nullptr;
-    for(auto& p : tokenized_path){
-        if(p == ".."){
-            if(parent->parent){
-                parent = parent->parent;
-            }
-            found = parent;
-            continue;
-        }
-        found = nullptr;
-        for(auto& f : parent->children){
-            if(f->name == p){
-                if(f->type == F){
-                    std::cout << p << ": Not a directory\n";
-                    return nullptr;
-                }
-                found = f;
-                break;
-            }
-        }
-        if(found){
-            parent = found;
-        }
-        else{
-            break;
-        }
-    }
-    return found;
-}
-
-File::File(std::string name, std::string path, int type){
+File::File(string name, string path, int type){
     this->name = std::move(name);
     this->path = std::move(path);
     this->type = type;
     this->start = -1;
     this->length = -1;
-    extents = std::vector<std::pair<int, int>>();
-    children = std::vector<File*>();
+    this->parent = nullptr;
+    extents = vector<pair<int, int>>();
+    children = vector<File*>();
 }
 
-File::File(std::string name, std::string path, int type, int start, int length) {
+File::File(string name, string path, int type, int start, int length) {
     this->name = std::move(name);
     this->path = std::move(path);
     this->type = type;
     this->type = type;
     this->start = start;
     this->length = length;
-    extents = std::vector<std::pair<int, int>>();
-    children = std::vector<File*>();
+    this->parent = nullptr;
+    extents = vector<pair<int, int>>();
+    children = vector<File*>();
 }
 
 File::~File(){
@@ -85,11 +55,39 @@ File::~File(){
         delete f;
     }
 }
-std::vector<std::string> tokenize(std::string path, char control){
-    std::vector<std::string> tokens;
-    std::string s;
+
+File *getFile(vector<string> &tokenized_path, File *parent){
+    for(auto& p : tokenized_path){
+        if(p == ".."){
+            if(parent->parent){
+                parent = parent->parent;
+            }
+            continue;
+        }
+
+        auto it = find_if(parent->children.begin(), parent->children.end(),[p](File* a){
+            return a->name == p;
+        });
+        if(it != parent->children.end()){
+            if((*it)->type != F){
+                parent = *it;
+            }
+            else{
+                cout << p << ": Not a directory\n";
+            }
+        }
+        else{
+            parent = nullptr;
+        }
+    }
+    return parent;
+}
+
+vector<string> tokenize(string path, char control){
+    vector<string> tokens;
+    string s;
     if(path[0] == '/'){
-        path = path.substr(1, std::string::npos);
+        path = path.substr(1, string::npos);
     }
     for(auto& c : path){
         if(c != control){
@@ -100,129 +98,109 @@ std::vector<std::string> tokenize(std::string path, char control){
             s = "";
         }
     }
-    tokens.push_back(s);
+    if(!s.empty())
+        tokens.push_back(s);
     return tokens;
 }
 
 
-int add_file(std::string path, File* parent, int type, File* to_add){
-    std::vector<std::string> tokenized_path = tokenize(path, '/');
-    std::string name = tokenized_path[tokenized_path.size() - 1];
+int add_file(const string& path, File* parent, int type, File* to_add){
+    vector<string> tokenized_path = tokenize(path, '/');
+    string name = tokenized_path[tokenized_path.size() - 1];
     tokenized_path.pop_back();
 
     File* found = getFile(tokenized_path, parent);
 
-    if(!tokenized_path.empty() && !found){
-        std::cout << path << ": No such directory\n";
-    }
-    else {
-        if(found){
-            parent = found;
-        }
-
-        if(std::find_if(parent->children.begin(), parent->children.end(),[name](const File* a){
-            if(a->name == name)
-                return true;
+    if (tokenized_path.empty() || found) {
+        parent = found ? found : parent;
+       
+        if (find_if(parent->children.begin(), parent->children.end(), [name](const File *a) {
+            return a->name == name;
         }) == parent->children.end()) {
-            if (!to_add)
-                to_add = new File(name, (parent->path == "/" ? "" : parent->path) + "/" + name, type);
+            to_add = to_add ? to_add : new File(name, (parent->path == "/" ? "" : parent->path) + "/" + name, type);
             to_add->parent = parent;
             parent->children.push_back(to_add);
-        }
-        else{
-            std::cout << "cannot create: " << name << " file already exists\n";
+        } else {
+            cout << "cannot create: " << name << " file already exists\n";
         }
 
+    } else {
+        cout << ": No such directory\n";
     }
 }
 
-void delete_file(std::string path, File* parent, File* cwd){
-    std::vector<std::string> tokenized_path = tokenize(path, '/');
-    std::string name = tokenized_path[tokenized_path.size() - 1];
+void delete_file(const string& path, File* parent) {
+    vector<string> tokenized_path = tokenize(path, '/');
+    string name = tokenized_path[tokenized_path.size() - 1];
     tokenized_path.pop_back();
 
     File *found = getFile(tokenized_path, parent);
 
-    if(!tokenized_path.empty() && !found){
-        std::cout << path << ": No such directory\n";
-    }
-    else {
-        if(found){
-           parent = found;
-        }
-        int i;
-        for(i = 0; i < parent->children.size(); ++i){
-            if(parent->children[i]->name == name){
-                break;
-            }
-        }
-        if(i == parent->children.size()){
-            std::cout << name << ": No such file\n";
-        }
-        else{
-            File* to_remove = parent->children[i];
-            parent->children.erase(parent->children.begin() + i);
+    if (!tokenized_path.empty() && !found) {
+        cout << path << ": No such directory\n";
+    } else {
+        parent = found ? found : parent;
+
+        auto it = find_if(parent->children.begin(), parent->children.end(), [name](File *a) {
+            return a->name == name;
+        });
+
+        if (it == parent->children.end()) {
+            cout << name << ": No such file\n";
+        } else {
+            File *to_remove = *it;
+            parent->children.erase(it);
             delete to_remove;
         }
     }
 }
 
 
-File* chdir(std::string path, File* parent){
-    std::vector<std::string> tokenized_pth = tokenize(path, '/');
+File* chdir(const string& path, File* parent){
+    vector<string> tokenized_pth = tokenize(path, '/');
     File* found = getFile(tokenized_pth, parent);
 
     if(!found){
-        std::cout << path << ": malformed path\n";
+        cout << path << ": malformed path\n";
         return nullptr;
     }
 
     return found;
 }
 
-void move(std::string path1, std::string path2, File* parent1, File* parent2){
-    std::vector<std::string> tokenized_path_1 = tokenize(path1, '/');
-    std::string name1 = tokenized_path_1[tokenized_path_1.size() - 1];
+void move(const string& path1, const string& path2, File* parent1, File* parent2){
+    vector<string> tokenized_path_1 = tokenize(path1, '/');
+    string name1 = tokenized_path_1[tokenized_path_1.size() - 1];
     tokenized_path_1.pop_back();
 
-    std::vector<std::string> tokenized_path_2 = tokenize(path2, '/');
+    vector<string> tokenized_path_2 = tokenize(path2, '/');
 
     File* immediate_parent1 = getFile(tokenized_path_1, parent1);
     File* immediate_parent2 = getFile(tokenized_path_2, parent2);
 
     if(!tokenized_path_1.empty() && !immediate_parent1){
-        std::cout << path1 << ": file not found";
+        cout << path1 << ": file not found";
     }
 
     else if(!tokenized_path_2.empty() && !immediate_parent2){
-        std::cout << path2 << ": file not found";
+        cout << path2 << ": location not found";
     }
 
     else {
-        if (immediate_parent1) {
-            parent1 = immediate_parent1;
-        }
-        if (immediate_parent2) {
-            parent2 = immediate_parent2;
-        }
-        File *to_move = nullptr;
+        parent1 = immediate_parent1 ? immediate_parent1 : parent1;
+        parent2 = immediate_parent2 ? immediate_parent2 : parent2;
 
-        int i;
-        for (i = 0; i < parent1->children.size(); ++i) {
-            if (parent1->children[i]->name == name1) {
-                break;
-            }
-        }
-        if (i == parent1->children.size()) {
-            std::cout << name1 << ": No such file\n";
-        } else {
-            to_move = parent1->children[i];
-            parent1->children.erase(parent1->children.begin() + i);
-        }
+        auto it = find_if(parent1->children.begin(), parent1->children.end(), [name1](File* a){
+           return a->name == name1;
+        });
 
-        if(to_move){
-            to_move->path = (parent2->path == "/" ? "" : parent2->path) + "/" + to_move->name;
-            parent2->children.push_back(to_move);
+        if(it == parent1->children.end()){
+            cout << name1 << ": No such file\n";
+        }
+        else{
+            (*it)->path = (parent2->path == "/" ? "" : parent2->path) + "/" + (*it)->name;
+            parent2->children.push_back(*it);
+            parent1->children.erase(it);
         }
     }
 }

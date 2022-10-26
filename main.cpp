@@ -1,6 +1,7 @@
 #include <iostream>
 #include "filesystem.h"
 #include "filehandling.h"
+#include "disk.h"
 
 using namespace std;
 
@@ -11,14 +12,47 @@ void rm(File* root, File* cwd);
 void ls(File* cwd);
 void mv(File* root, File* cwd);
 
+void show_instructions();
+
 int main() {
-    File* root = new File("root", "/", DIR);
-    File* cwd = root;
+    File *root = new File("root", "/", DIR);
+    File *cwd = root;
+
+    vector<vector<char>> disk(DISK_SIZE, vector<char>());
+    vector<bool> free(DISK_SIZE, true);
 
     ifstream directory_file_in("directory.txt");
     create_directory_tree(root, directory_file_in);
     directory_file_in.close();
 
+    show_instructions();
+
+    string command;
+    while (command != "quit") {
+        cout << cwd->path << "> ";
+        cin >> command;
+
+        if (command == "cd") {
+            cwd = cd(root, cwd);
+        } else if (command == "ls") {
+            ls(cwd);
+        } else if (command == "mkdir") {
+            mkdir(root, cwd);
+        } else if (command == "touch") {
+            touch(root, cwd);
+        } else if (command == "rm") {
+            rm(root, cwd);
+        } else if (command == "mv") {
+            mv(root, cwd);
+        } else if (command == "quit") {
+            ofstream directory_file_out("directory.txt", ios_base::trunc);
+            serialize(root, directory_file_out);
+            directory_file_out.close();
+        }
+    }
+}
+
+void show_instructions() {
     cout << "commands list:\n\n"
          << "cd <path>\t\t\tchange current directory\n"
          << "ls \t\t\t\t\tlist files in directory\n"
@@ -28,52 +62,25 @@ int main() {
          << "mv <path> <path>\tmove file to given path\n"
          << "open <path> <mode>\topen a file in mode (r = read, w = write, w+ = write/read, r+ = read/write\n"
          << "close <path>\t\tclose file\n"
-         << "exit\t\t\t\texit program\n\n\n";
-
-    string command;
-    while(command != "quit") {
-        cout << cwd->path << "> ";
-        cin >> command;
-        if(command == "cd"){
-            File* next = cd(root, cwd);
-            if(next){
-                cwd = next;
-            }
-        }
-        else if(command == "ls"){
-            ls(cwd);
-        }
-        else if(command == "mkdir"){
-            mkdir(root, cwd);
-        }
-        else if(command == "touch"){
-            touch(root, cwd);
-        }
-        else if(command == "rm"){
-            rm(root, cwd);
-        }
-        else if(command == "mv"){
-            mv(root, cwd);
-        }
-        else if(command == "quit"){
-            ofstream directory_file_out("directory.txt", ios_base::trunc);
-            serialize(root, directory_file_out);
-            directory_file_out.close();
-        }
-    }
+         << "quit\t\t\t\tquit program\n\n\n";
 }
 
 File* cd(File* root, File* cwd){
     string path;
     cin >> path;
-    if(path == "/"){
-        return root;
-    }
+
+    File* to_return;
+
+    if(path == "/")
+        to_return = root;
+
     else if(path[0] == '/')
-        return chdir(path, root);
+        to_return = chdir(path, root);
 
     else
-        return chdir(path, cwd);
+        to_return = chdir(path, cwd);
+
+    return to_return ? to_return : cwd;
 }
 
 void ls(File* cwd){
@@ -111,11 +118,11 @@ void rm(File* root, File* cwd){
     cin >> path;
 
     if(path[0] == '/')
-        delete_file(path, root, cwd);
+        delete_file(path, root);
 
     else
-        delete_file(path, cwd, cwd);
-};
+        delete_file(path, cwd);
+}
 
 void mv(File* root, File* cwd){
     string path2;
@@ -134,6 +141,3 @@ void mv(File* root, File* cwd){
 
     move(path1, path2, parent1, parent2);
 }
-
-
-void touch(File* root, File* cwd);
