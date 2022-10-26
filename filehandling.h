@@ -13,6 +13,7 @@ void serialize(File*& root, ofstream& disk_file){
         for(auto& e : root->extents){
             disk_file << "," << e.first << "," << e.second;
         }
+
         disk_file << "\n";
     }
     for(auto& c : root->children)
@@ -23,10 +24,12 @@ void create_directory_tree(File*& root, ifstream& filesystem_structure_file){
     string line;
     while(getline(filesystem_structure_file, line)){
         vector<string> tokens = tokenize(line , ',');
+
         File* f = new File(tokens[0], tokens[1], stoi(tokens[2]), stoi(tokens[3]), stoi(tokens[4]));
         for(int i = 5; i < tokens.size(); i +=2){
             f->extents.emplace_back(stoi(tokens[i]), stoi(tokens[i + 1]));
         }
+
         add_file(f->path, root, f->type, f);
     }
 }

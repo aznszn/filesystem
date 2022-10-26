@@ -94,22 +94,13 @@ void mkdir(File* root, File* cwd){
     string path;
     cin >> path;
 
-    if(path[0] == '/')
-        add_file(path, root, DIR, nullptr);
-
-    else
-        add_file(path, cwd, DIR, nullptr);
+    add_file(path, path[0] == '/' ? root : cwd, DIR, nullptr);
 }
 
 void touch(File* root, File* cwd){
     string path;
     cin >> path;
-
-    if(path[0] == '/')
-        add_file(path, root, F, nullptr);
-
-    else
-        add_file(path, cwd, F, nullptr);
+    add_file(path, path[0] == '/' ? root : cwd, F, nullptr);
 }
 
 
@@ -117,11 +108,7 @@ void rm(File* root, File* cwd){
     string path;
     cin >> path;
 
-    if(path[0] == '/')
-        delete_file(path, root);
-
-    else
-        delete_file(path, cwd);
+    delete_file(path, path[0] == '/' ? root : cwd);
 }
 
 void mv(File* root, File* cwd){
@@ -130,14 +117,8 @@ void mv(File* root, File* cwd){
     cin >> path1;
     cin >> path2;
 
-    File* parent1 = cwd;
-    File* parent2 = cwd;
-    if(path1[0] == '/'){
-        parent1 = root;
-    }
-    if(path2[0] == '/'){
-        parent2 = root;
-    }
+    File* parent1 = path1[0] == '/' ? root :cwd;
+    File* parent2 = path2[0] == '/' ? root :cwd;
 
     move(path1, path2, parent1, parent2);
 }

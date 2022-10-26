@@ -104,7 +104,7 @@ vector<string> tokenize(string path, char control){
 }
 
 
-int add_file(const string& path, File* parent, int type, File* to_add){
+void add_file(const string& path, File* parent, int type, File* to_add){
     vector<string> tokenized_path = tokenize(path, '/');
     string name = tokenized_path[tokenized_path.size() - 1];
     tokenized_path.pop_back();
