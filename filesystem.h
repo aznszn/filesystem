@@ -1,8 +1,6 @@
 #ifndef FILESYSTEM_FILESYSTEM_H
 #define FILESYSTEM_FILESYSTEM_H
 
-#endif //FILESYSTEM_FILESYSTEM_H
-
 #include <string>
 #include <utility>
 #include <vector>
@@ -10,6 +8,9 @@
 #include <iostream>
 #define F 1
 #define DIR 0
+#define R 1
+#define W 2
+#define RW 3
 
 using namespace std;
 
@@ -22,6 +23,7 @@ struct File{
     int length;
     vector<File*> children;
     vector<pair<int, int>> extents;
+    int size;
     File(string name, string path, int type);
     File(string name, string path, int type, int start, int length);
     ~File();
@@ -42,12 +44,12 @@ File::File(string name, string path, int type, int start, int length) {
     this->name = std::move(name);
     this->path = std::move(path);
     this->type = type;
-    this->type = type;
     this->start = start;
     this->length = length;
     this->parent = nullptr;
-    extents = vector<pair<int, int>>();
-    children = vector<File*>();
+    this->extents = vector<pair<int, int>>();
+    this->children = vector<File*>();
+    this->size = 0;
 }
 
 File::~File(){
@@ -56,7 +58,27 @@ File::~File(){
     }
 }
 
-File *getFile(vector<string> &tokenized_path, File *parent){
+struct opened_file{
+    File* file;
+    vector<char> file_mem;
+    bool dirty;
+    string mode;
+    opened_file(File* file, string mode){
+        this->file = file;
+        this->mode = mode;
+        this->dirty = false;
+        this->file_mem = vector<char>();
+    }
+};
+
+struct open_file{
+    File* file;
+    vector<vector<char>> file_mem;
+    int mode;
+    int dirty;
+};
+
+File *get_dir(vector<string> &tokenized_path, File *parent){
     for(auto& p : tokenized_path){
         if(p == ".."){
             if(parent->parent){
@@ -104,12 +126,12 @@ vector<string> tokenize(string path, char control){
 }
 
 
-void add_file(const string& path, File* parent, int type, File* to_add){
+File* add_file(const string& path, File* parent, int type, File* to_add){
     vector<string> tokenized_path = tokenize(path, '/');
     string name = tokenized_path[tokenized_path.size() - 1];
     tokenized_path.pop_back();
 
-    File* found = getFile(tokenized_path, parent);
+    File* found = get_dir(tokenized_path, parent);
 
     if (tokenized_path.empty() || found) {
         parent = found ? found : parent;
@@ -120,45 +142,21 @@ void add_file(const string& path, File* parent, int type, File* to_add){
             to_add = to_add ? to_add : new File(name, (parent->path == "/" ? "" : parent->path) + "/" + name, type);
             to_add->parent = parent;
             parent->children.push_back(to_add);
+            return to_add;
         } else {
             cout << "cannot create: " << name << " file already exists\n";
+            return nullptr;
         }
 
     } else {
         cout << ": No such directory\n";
+        return nullptr;
     }
 }
-
-void delete_file(const string& path, File* parent) {
-    vector<string> tokenized_path = tokenize(path, '/');
-    string name = tokenized_path[tokenized_path.size() - 1];
-    tokenized_path.pop_back();
-
-    File *found = getFile(tokenized_path, parent);
-
-    if (!tokenized_path.empty() && !found) {
-        cout << path << ": No such directory\n";
-    } else {
-        parent = found ? found : parent;
-
-        auto it = find_if(parent->children.begin(), parent->children.end(), [name](File *a) {
-            return a->name == name;
-        });
-
-        if (it == parent->children.end()) {
-            cout << name << ": No such file\n";
-        } else {
-            File *to_remove = *it;
-            parent->children.erase(it);
-            delete to_remove;
-        }
-    }
-}
-
 
 File* chdir(const string& path, File* parent){
     vector<string> tokenized_pth = tokenize(path, '/');
-    File* found = getFile(tokenized_pth, parent);
+    File* found = get_dir(tokenized_pth, parent);
 
     if(!found){
         cout << path << ": malformed path\n";
@@ -175,8 +173,8 @@ void move(const string& path1, const string& path2, File* parent1, File* parent2
 
     vector<string> tokenized_path_2 = tokenize(path2, '/');
 
-    File* immediate_parent1 = getFile(tokenized_path_1, parent1);
-    File* immediate_parent2 = getFile(tokenized_path_2, parent2);
+    File* immediate_parent1 = get_dir(tokenized_path_1, parent1);
+    File* immediate_parent2 = get_dir(tokenized_path_2, parent2);
 
     if(!tokenized_path_1.empty() && !immediate_parent1){
         cout << path1 << ": file not found";
@@ -212,3 +210,58 @@ void move(const string& path1, const string& path2, File* parent1, File* parent2
         }
     }
 }
+
+File* get_file(const string& path, File* parent){
+    vector<string> tokenized_path = tokenize(path, '/');
+    string name = tokenized_path[tokenized_path.size() - 1];
+    tokenized_path.pop_back();
+
+    File *found = get_dir(tokenized_path, parent);
+
+    if (!tokenized_path.empty() && !found) {
+        cout << path << ": No such directory\n";
+        return nullptr;
+    } else {
+        parent = found ? found : parent;
+
+        auto it = find_if(parent->children.begin(), parent->children.end(), [name](File *a) {
+            return a->name == name;
+        });
+
+        if (it == parent->children.end()) {
+            cout << name << ": No such file\n";
+            return nullptr;
+        } else {
+            return *it;
+        }
+    }
+}
+
+File* delete_file(const string& path, File* parent) {
+    vector<string> tokenized_path = tokenize(path, '/');
+    string name = tokenized_path[tokenized_path.size() - 1];
+    tokenized_path.pop_back();
+
+    File *found = get_dir(tokenized_path, parent);
+
+    if (!tokenized_path.empty() && !found) {
+        cout << path << ": No such directory\n";
+    } else {
+        parent = found ? found : parent;
+
+        auto it = find_if(parent->children.begin(), parent->children.end(), [name](File *a) {
+            return a->name == name;
+        });
+
+        if (it == parent->children.end()) {
+            cout << name << ": No such file\n";
+        } else {
+            File *to_remove = *it;
+            parent->children.erase(it);
+            return to_remove;
+        }
+    }
+    return nullptr;
+}
+
+#endif //FILESYSTEM_FILESYSTEM_H

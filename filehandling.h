@@ -1,8 +1,6 @@
 #ifndef FILESYSTEM_FILEHANDLING_H
 #define FILESYSTEM_FILEHANDLING_H
 
-#endif //FILESYSTEM_FILEHANDLING_H
-
 #include <fstream>
 
 using namespace std;
@@ -57,3 +55,5 @@ void write_disk_to_file(vector<vector<char>> disk,vector<bool> free, ofstream& d
         }
     }
 }
+
+#endif //FILESYSTEM_FILEHANDLING_H
