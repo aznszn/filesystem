@@ -1,7 +1,7 @@
 #ifndef FILESYSTEM_DISK_H
 #define FILESYSTEM_DISK_H
 
-#define BLOCK_SIZE 64.0
+#define BLOCK_SIZE 4
 #define DISK_SIZE 1024
 
 vector<char> read_block(vector<vector<char>> disk, int block_num){
@@ -100,6 +100,9 @@ void deallocate_memory(File* f,int num_blocks,vector<bool>& free_blocks){
     for(int i = f->extents.size() - 1; i >= 0 && num_blocks; i--){
         if(f->extents[i].second <= num_blocks){
             num_blocks -= f->extents[i].second;
+            for(int j = f->extents[i].first; j < f->extents[i].first + f->extents[i].second; j++){
+                free_blocks[j] = true;
+            }
             f->extents.erase(f->extents.begin() + i);
         }
         else{
@@ -113,6 +116,7 @@ void deallocate_memory(File* f,int num_blocks,vector<bool>& free_blocks){
     if(num_blocks){
         for(int i = f->start + f->length - 1; i >=0 && num_blocks; i--){
             free_blocks[i] = true;
+            f->length--;
             num_blocks--;
         }
     }
