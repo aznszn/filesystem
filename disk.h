@@ -1,7 +1,7 @@
 #ifndef FILESYSTEM_DISK_H
 #define FILESYSTEM_DISK_H
 
-#define BLOCK_SIZE 4
+#define BLOCK_SIZE 64
 #define DISK_SIZE 1024
 
 vector<char> read_block(vector<vector<char>> disk, int block_num){
