@@ -3,113 +3,134 @@
 #include "filehandling.h"
 #include <math.h>
 #include "disk.h"
+#include <thread>
+#include <mutex>
+#include <cstring>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <netinet/in.h>
+
+#define PORT 8080
+#define BUFFER_SIZE 1024
 
 using namespace std;
 
-File* cd(File* root, File* cwd);
-void mkdir(File* root, File* cwd);
-void touch(File* root, File* cwd, vector<bool>&free_blocks);
-void rm(File* root, File* cwd, vector<bool>&free_blocks);
-void ls(File* cwd);
-void mv(File* root, File* cwd);
-void open_file(File* root, File* cwd, vector<opened_file*>&open_files, const vector<vector<char>>&disk);
-void read(File* root, File* cwd, vector<opened_file*>&open_files);
-void write(File* root, File* cwd, vector<opened_file*>&open_files, vector<vector<char>>&disk, vector<bool>&free_blocks);
-void
-truncate(File* root, File* cwd, vector<opened_file*> open_files, vector<vector<char>>&disk, vector<bool>&free_blocks);
-void move_within_file(File* root, File* cwd, vector<opened_file*> open_files, vector<vector<char>>&disk,
-                      vector<bool>&free_blocks);
-void close_file(string path, File* root, File* cwd, vector<opened_file*>&open_files, vector<vector<char>>&disk);
-void print_memory_map(File* root, int depth = 0);
-void show_instructions();
+File *cd(File *root, File *cwd, string path);
 
-int main() {
-    File* root = new File("root", "/", DIR);
-    File* cwd = root;
+string mkdir(File *root, File *cwd, string path);
 
+string touch(File *root, File *cwd, vector<bool> &free_blocks, string path);
+
+string rm(File *root, File *cwd, vector<bool> &free_blocks, string path, vector<opened_file *> &opened_files);
+
+string ls(File *cwd);
+
+string mv(File *root, File *cwd, string path1, string path2, vector<opened_file *> &opened_files);
+
+string
+open_file(File *root, File *cwd, vector<opened_file *> &open_files, const vector<vector<char>> &disk, string path,
+          string mode, string owner);
+
+string read(File *root, File *cwd, vector<opened_file *> &open_files, string path, int start, int length);
+
+string
+write(File *root, File *cwd, vector<opened_file *> &open_files, vector<vector<char>> &disk, vector<bool> &free_blocks,
+      string path, int start, string content, string owner);
+
+string truncate(File *root, File *cwd, vector<opened_file *> open_files, vector<vector<char>> &disk,
+                vector<bool> &free_blocks, string path, int maxsize, string owner);
+
+string move_within_file(File *root, File *cwd, vector<opened_file *> open_files, vector<vector<char>> &disk,
+                        vector<bool> &free_blocks, string path, int start, int size, int target, string owner);
+
+string close_file(string path, File *root, File *cwd, vector<opened_file *> &open_files, vector<vector<char>> &disk,
+                  string owner);
+
+string print_memory_map(File *root, int depth = 0);
+
+
+void thread_function(int socket_id, string owner, File *root, File *cwd, vector<vector<char>> &disk,
+                     vector<bool> &free_blocks, vector<opened_file *> &open_files);
+
+
+mutex opening_mutex;
+mutex serialize_lock;
+
+
+int main(int argc, char **argv) {
+    File *root = new File("root", "/", DIR);
+    File *cwd = root;
     vector<vector<char>> disk(DISK_SIZE, vector<char>());
     vector<bool> free_blocks(DISK_SIZE, true);
-    vector<opened_file*> open_files;
-
+    vector<opened_file *> open_files;
+    vector<thread> threads;
     ifstream directory_file_in("directory.txt");
     create_directory_tree(root, directory_file_in);
     directory_file_in.close();
-
+    string quit;
     ifstream disk_file_in("disk.dat");
     init_disk(disk, free_blocks, disk_file_in);
     disk_file_in.close();
 
-    show_instructions();
-
-    string command;
-    while (command != "quit") {
-        cout << cwd->path << "> ";
-        cin >> command;
-        if (command == "cd") {
-            cwd = cd(root, cwd);
-        } else if (command == "ls") {
-            ls(cwd);
-        } else if (command == "mkdir") {
-            mkdir(root, cwd);
-        } else if (command == "touch") {
-            touch(root, cwd, free_blocks);
-        } else if (command == "rm") {
-            rm(root, cwd, free_blocks);
-        } else if (command == "mv") {
-            mv(root, cwd);
-        } else if (command == "open") {
-            open_file(root, cwd, open_files, disk);
-        } else if (command == "write") {
-            write(root, cwd, open_files, disk, free_blocks);
-        } else if (command == "read") {
-            read(root, cwd, open_files);
-        } else if (command == "truncate") {
-            truncate(root, cwd, open_files, disk, free_blocks);
-        } else if (command == "close") {
-            close_file("", root, cwd, open_files, disk);
-        } else if (command == "mvwf") {
-            move_within_file(root, cwd, open_files, disk, free_blocks);
-        } else if (command == "pmm") {
-            print_memory_map(root);
-        } else if (command == "quit") {
-            for (auto&f: open_files) {
-                close_file(f->file->path, root, cwd, open_files, disk);
-            }
-            ofstream directory_file_out("directory.txt", ios_base::trunc);
-            serialize(root, directory_file_out);
-            directory_file_out.close();
-            ofstream disk_file_out("disk.dat", ios_base::trunc);
-            write_disk_to_file(disk, free_blocks, disk_file_out);
-            disk_file_out.close();
-            delete root;
-            return 0;
-        }
+    int server_fd, new_socket;
+    struct sockaddr_in address{};
+    int opt = 1;
+    int addrlen = sizeof(address);
+    char name[64] = {0};
+    // Creating socket file descriptor
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
     }
+
+    // Forcefully attaching socket to the port 8080
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    // Forcefully attaching socket to the port 8080
+    if (bind(server_fd, (struct sockaddr *) &address, sizeof(address)) < 0) {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
+    if (listen(server_fd, 3) < 0) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+    while (true) {
+        if ((new_socket = accept(server_fd,
+                                 (struct sockaddr *) &address, (socklen_t *) &addrlen)) < 0) {
+            perror("accept");
+            exit(EXIT_FAILURE);
+        }
+        if (read(new_socket, name, 64) < 0) {
+            perror("error reading");
+        }
+        cout << name << " logged in\n\n";
+        string owner(name);
+        threads.emplace_back(thread_function, ref(new_socket), ref(owner), ref(root), ref(cwd), ref(disk),
+                             ref(free_blocks), ref(open_files));
+        memset(name, 0, 64);
+    }
+    for (auto &thread: threads) {
+        thread.join();
+    }
+    close(new_socket);
+    // closing the connected socket
+
+    // closing the listening socket
+    shutdown(server_fd, SHUT_RDWR);
+
+    return 0;
 }
 
-void show_instructions() {
-    cout << "commands list:\n\n"
-         << "cd <path>\t\t\t\t\tchange current directory\n"
-         << "ls \t\t\t\t\t\t\tlist files in directory\n"
-         << "mkdir <path>\t\t\t\tcreate empty directory\n"
-         << "touch <path>\t\t\t\tcreate file\n"
-         << "rm <path>\t\t\t\t\tdelete file/directory\n"
-         << "mv <path> <path>\t\t\tmove file to given path\n"
-         << "open <path> <mode>\t\t\topen a file in mode (r = read, w = write, rw = read/write\n"
-         << "close <path>\t\t\t\tclose file\n"
-         << "write <path> <offset> <content>\t\t\t\t\t\t\twrite to a file at given offset\n"
-         << "read <path> <offset> <num of bytes>\t\t\t\t\t\tread given number of bytes from a offset from a file\n"
-         << "mvwf <path> <source offset> <num of bytes> <target offset>\tmove given number of bytes from source offset to target offset within file\n"
-         << "truncate <path> <size>\t\ttruncate file to given size\n"
-         << "pmm \tprint memory map\n"
-         << "quit\t\t\t\t\t\tquit program\n\n\n";
-}
 
-File* cd(File* root, File* cwd) {
-    string path;
-    cin >> path;
-
-    File* to_return;
+File *cd(File *root, File *cwd, string path) {
+    File *to_return;
 
     if (path == "/")
         to_return = root;
@@ -123,261 +144,248 @@ File* cd(File* root, File* cwd) {
     return to_return ? to_return : cwd;
 }
 
-void ls(File* cwd) {
-    for (auto&f: cwd->children) {
-        cout << f->name << "\t";
+string ls(File *cwd) {
+    string msg;
+    for (auto &f: cwd->children) {
+        msg += (f->name + "\t");
     }
-    cout << "\n";
+    msg += "\n";
+    return msg;
 }
 
-void mkdir(File* root, File* cwd) {
-    string path;
-    cin >> path;
-
+string mkdir(File *root, File *cwd, string path) {
     add_file(path, path[0] == '/' ? root : cwd, DIR, nullptr);
+    return path + " directory created";
 }
 
-void touch(File* root, File* cwd, vector<bool>&free_blocks) {
-    string path;
-    cin >> path;
-    File* added = add_file(path, path[0] == '/' ? root : cwd, F, nullptr);
+string touch(File *root, File *cwd, vector<bool> &free_blocks, string path) {
+    string msg;
+    File *added = add_file(path, path[0] == '/' ? root : cwd, F, nullptr);
     if (added) {
         allocate_memory(added, free_blocks);
+        msg = path + " file created";
+    } else {
+        msg = "Error creating file";
     }
+    return msg;
 }
 
 
-void rm(File* root, File* cwd, vector<bool>&free_blocks) {
-    string path;
-    cin >> path;
-    File* to_delete = delete_file(path, path[0] == '/' ? root : cwd);
+string rm(File *root, File *cwd, vector<bool> &free_blocks, string path, vector<opened_file *> &opened_files) {
+    string msg;
+    File *to_delete = delete_file(path, path[0] == '/' ? root : cwd, opened_files);
     if (to_delete) {
         deallocate_file(to_delete, free_blocks);
+        msg = path + " file removed";
+    } else {
+        msg = "Error removing file";
     }
     delete to_delete;
+    return msg;
 }
 
-void mv(File* root, File* cwd) {
-    string path2;
-    string path1;
-    cin >> path1;
-    cin >> path2;
-
-    File* parent1 = path1[0] == '/' ? root : cwd;
-    File* parent2 = path2[0] == '/' ? root : cwd;
-
-    move(path1, path2, parent1, parent2);
+string mv(File *root, File *cwd, string path1, string path2, vector<opened_file *> &opened_files) {
+    string msg;
+    File *parent1 = path1[0] == '/' ? root : cwd;
+    File *parent2 = path2[0] == '/' ? root : cwd;
+    move(path1, path2, parent1, parent2, opened_files);
+    msg = path1 + " moved to " + path2;
+    return msg;
 }
 
-void open_file(File* root, File* cwd, vector<opened_file*>&open_files, const vector<vector<char>>&disk) {
-    string path;
-    cin >> path;
-    string mode;
-    cin >> mode;
-    for (char&i: mode) {
+string open_file(File *root, File *cwd, vector<opened_file *> &open_files, const vector<vector<char>> &disk,
+                 string path, string mode, string owner) {
+    string msg;
+    for (char &i: mode) {
         i = toupper(i);
     }
 
     if (mode != "R" && mode != "W" && mode != "RW") {
-        cout << "Usage: open <path/to/file> <mode(r/w/rw)>\n";
-        return;
+        msg = "Usage: open <path/to/file> <mode(r/w/rw)>\n";
+        return msg;
     }
-    File* returned = get_file(path, path[0] == '/' ? root : cwd);
+    File *returned = get_file(path, path[0] == '/' ? root : cwd);
+    opening_mutex.lock();
     if (returned) {
-        auto it = find_if(open_files.begin(), open_files.end(), [returned](const opened_file* f) {
+        auto it = find_if(open_files.begin(), open_files.end(), [returned](const opened_file *f) {
             return f->file->path == returned->path;
         });
         if (it == open_files.end()) {
             open_files.emplace_back(new opened_file(returned, mode));
+            open_files.back()->owners.push_back(owner);
+            mode == "R" ? open_files.back()->mtx.lock_shared() : open_files.back()->mtx.lock();
             read_file(open_files[open_files.size() - 1], disk);
-        } else if ((*it)->mode == mode) {
-            cout << "file is already open in same mode\n";
+            msg = path + " opened in " + mode + " mode";
+        } else if (find((*it)->owners.begin(), (*it)->owners.end(), owner) == (*it)->owners.end()) {
+            mode == "R" ? (*it)->mtx.lock_shared() : (*it)->mtx.lock();
+            (*it)->owners.push_back(owner);
+            read_file(open_files[open_files.size() - 1], disk);
+            msg = path + " opened in " + mode + " mode";
         } else {
-            (*it)->mode = mode;
+            if ((*it)->mode == mode) {
+                msg = path + " already open in same mode";
+            } else {
+                (*it)->mtx.unlock_shared();
+                (*it)->mtx.unlock();
+                mode == "R" ? (*it)->mtx.lock_shared() : (*it)->mtx.lock();
+                (*it)->mode = mode;
+                msg = path + " opened in " + mode + " mode";
+            }
         }
     }
+    opening_mutex.unlock();
+    return msg;
 }
 
-void close_file(string path, File* root, File* cwd, vector<opened_file*>&open_files, vector<vector<char>>&disk) {
-    if (path.empty()) {
-        cin >> path;
-    }
-    File* returned = get_file(path, path[0] == '/' ? root : cwd);
+string close_file(string path, File *root, File *cwd, vector<opened_file *> &open_files, vector<vector<char>> &disk,
+                  string owner) {
+    string msg;
+    File *returned = get_file(path, path[0] == '/' ? root : cwd);
 
     if (returned) {
-        auto it = find_if(open_files.begin(), open_files.end(), [returned](const opened_file* f) {
-            return f->file->path == returned->path;
+        auto it = find_if(open_files.begin(), open_files.end(), [returned, owner](const opened_file *f) {
+            auto it = find(f->owners.begin(), f->owners.end(), owner);
+            return f->file->path == returned->path && it != f->owners.end();
         });
         if (it != open_files.end()) {
-            opened_file* file = *it;
+            opened_file *file = *it;
+            file->mtx.unlock_shared();
+            file->mtx.unlock();
             if (file->dirty) {
                 write_file(file, disk);
             }
-            for (auto&f: open_files) {
-                if (f->file == returned) {
-                    open_files.erase(remove_if(open_files.begin(), open_files.end(), [returned](const opened_file* f) {
-                        return f->file->path == returned->path;
-                    }), open_files.end());
-                }
+            file->owners.erase(remove(file->owners.begin(), file->owners.end(), owner), file->owners.end());
+            if(file->owners.empty()){
+                open_files.erase(remove(open_files.begin(), open_files.end(), file), open_files.end());
             }
+            msg = path + " closed";
         } else {
-            cout << "file is not open\n";
+            msg = "file is not open\n";
         }
     } else {
-        cout << "file not found\n";
+        msg = "file not found\n";
     }
+    return msg;
 }
 
-void read(File* root, File* cwd, vector<opened_file*>&open_files) {
-    string path;
-    int start;
-    int length;
-    cin >> path;
-    cin >> start;
-    cin >> length;
-
-    File* returned = get_file(path, path[0] == '/' ? root : cwd);
+string read(File *root, File *cwd, vector<opened_file *> &open_files, string path, int start, int length) {
+    File *returned = get_file(path, path[0] == '/' ? root : cwd);
+    string content;
     if (returned) {
-        auto it = find_if(open_files.begin(), open_files.end(), [returned](const opened_file* f) {
+        auto it = find_if(open_files.begin(), open_files.end(), [returned](const opened_file *f) {
             return f->file->path == returned->path;
         });
         if (it != open_files.end() && (*it)->mode != "W" && (*it)->mode != "w") {
-            opened_file* file = *it;
+            opened_file *file = *it;
             cout << "reading " << length << " bytes starting from " << start << " from file: " << file->file->name
                  << "\n";
             for (int i = start; i < length && i < file->file_mem.size(); i++) {
-                cout << file->file_mem.at(i);
+                content += file->file_mem.at(i);
             }
-            cout << "\n";
+            content += "\n";
         } else {
-            cout << "file is not open or file is not open in read mode\n";
+            content = "file is not open or file is not open in read mode\n";
         }
     } else {
-        cout << "file not found\n";
+        content = "file not found\n";
     }
+    return content;
 }
 
-void
-write(File* root, File* cwd, vector<opened_file*>&open_files, vector<vector<char>>&disk, vector<bool>&free_blocks) {
-    string path;
-    int start;
-    string content;
-    cin >> path;
-    cin >> start;
-    cin >> content;
+string write(File *root, File *cwd, vector<opened_file *> &open_files, vector<vector<char>> &disk,
+             vector<bool> &free_blocks, string path, int start, string content, string owner) {
+    string msg;
     if (start < 0) {
-        return;
+        return "Start is negative";
     }
-    File* returned = get_file(path, path[0] == '/' ? root : cwd);
+    File *returned = get_file(path, path[0] == '/' ? root : cwd);
     if (returned) {
-        auto it = find_if(open_files.begin(), open_files.end(), [returned](const opened_file* f) {
-            return f->file->path == returned->path;
+        auto it = find_if(open_files.begin(), open_files.end(), [returned, owner](const opened_file *f) {
+            auto it = find(f->owners.begin(), f->owners.end(), owner);
+            return f->file->path == returned->path && it != f->owners.end();
         });
         if (it != open_files.end() && (*it)->mode != "R" && (*it)->mode != "r") {
-            opened_file* file = *it;
+            opened_file *file = *it;
             file->dirty = true;
             if (start > file->file_mem.size()) {
-                cout << "start size too large\n";
-                return;
+                msg = "start size too large\n";
+                return msg;
             }
             vector<char> new_file_mem = file->file_mem;
             if (start + content.size() > new_file_mem.size()) {
                 new_file_mem.resize(start + content.size());
             }
-            int file_size_on_disk = file->file_mem.size() > 0 ? file->file_mem.size() : 1;
-            int new_size = new_file_mem.size() > 0 ? new_file_mem.size() : 1;
-
-            int occupied_blocks = ceil(((double) file_size_on_disk / BLOCK_SIZE));
-            int required_blocks = ceil((double) new_size / BLOCK_SIZE);
-            int new_blocks_required = required_blocks - occupied_blocks;
-
-
-            while (new_blocks_required--) {
-                allocate_memory(file->file, free_blocks);
+            int file_size_on_disk = file->file_mem.size();
+            if (new_file_mem.size() / BLOCK_SIZE > file_size_on_disk / BLOCK_SIZE) {
+                int new_blocks_required =
+                        ceil((double) new_file_mem.size() / BLOCK_SIZE) - file_size_on_disk / BLOCK_SIZE;
+                while (new_blocks_required--) {
+                    allocate_memory(file->file, free_blocks);
+                }
             }
-
             for (int i = start; i < start + content.size(); i++) {
                 new_file_mem[i] = content[i - start];
             }
             file->file_mem = new_file_mem;
+            msg = "Successfully written at " + path;
         } else {
-            cout << "file is not open or files is not open in write mode\n";
+            msg = "file is not open or files is not open in write mode\n";
         }
     } else {
-        cout << "file not found\n";
+        msg = "file not found\n";
     }
+    return msg;
 }
 
-void
-truncate(File* root, File* cwd, vector<opened_file*> open_files, vector<vector<char>>&disk, vector<bool>&free_blocks) {
-    string path;
-    int maxsize;
-    cin >> path;
-    cin >> maxsize;
-    File* returned = get_file(path, path[0] == '/' ? root : cwd);
+string truncate(File *root, File *cwd, vector<opened_file *> open_files, vector<vector<char>> &disk,
+                vector<bool> &free_blocks, string path, int maxsize, string owner) {
+    string msg;
+    File *returned = get_file(path, path[0] == '/' ? root : cwd);
     if (returned) {
-        auto it = find_if(open_files.begin(), open_files.end(), [returned](const opened_file* f) {
-            return f->file->path == returned->path;
+        auto it = find_if(open_files.begin(), open_files.end(), [returned, owner](const opened_file *f) {
+            auto it = find(f->owners.begin(), f->owners.end(), owner);
+            return f->file->path == returned->path && it != f->owners.end();
         });
-        if (it != open_files.end()) {
-            opened_file* file = *it;
+        if (it != open_files.end() && (*it)->mode != "R") {
+            opened_file *file = *it;
             if (file->file_mem.size() > maxsize) {
-                /*int old_size = file->file_mem.size();
+                int old_size = file->file_mem.size();
                 file->file_mem.resize(maxsize);
                 if (old_size / BLOCK_SIZE < maxsize / BLOCK_SIZE) {
                     int blocks_to_deallocate = ceil((double) old_size / BLOCK_SIZE) - maxsize / BLOCK_SIZE;
                     deallocate_memory(file->file, blocks_to_deallocate, free_blocks);
-                }*/
-
-                int file_size_on_disk = file->file_mem.size() > 0 ? file->file_mem.size() : 1;
-                file->file_mem.resize(maxsize);
-                int new_size = file->file_mem.size() > 0 ? file->file_mem.size() : 1;
-
-                int occupied_blocks = ceil(((double) file_size_on_disk / BLOCK_SIZE));
-                int required_blocks = ceil((double) new_size / BLOCK_SIZE);
-                int blocks_to_deallocate = occupied_blocks - required_blocks;
-
-
-                //while (blocks_to_deallocate--) {
-                deallocate_memory(file->file, blocks_to_deallocate, free_blocks);
-                //}
+                }
                 read_file(file, disk);
+                msg = path + " truncated to size" + to_string(maxsize);
             } else {
-                cout << "New size given is more than file size";
+                msg = "New size given is more than file size";
             }
         } else {
-            cout << "file is not open\n";
+            msg = "file is not open\n";
         }
     } else {
-        cout << "file not found\n";
+        msg = "file not found\n";
     }
+    return msg;
 }
 
-void move_within_file(File* root, File* cwd, vector<opened_file*> open_files, vector<vector<char>>&disk,
-                      vector<bool>&free_blocks) {
-    string path;
-    int start;
-    int target;
-    int size;
-    cin >> path;
-    cin >> start;
-    cin >> size;
-    cin >> target;
-
+string move_within_file(File *root, File *cwd, vector<opened_file *> open_files, vector<vector<char>> &disk,
+                        vector<bool> &free_blocks, string path, int start, int size, int target, string owner) {
+    string msg;
     if (start < 0) {
-        return;
+        return "Start is negative";
     }
-
-    File* returned = get_file(path, path[0] == '/' ? root : cwd);
+    File *returned = get_file(path, path[0] == '/' ? root : cwd);
     if (returned) {
-        auto it = find_if(open_files.begin(), open_files.end(), [returned](const opened_file* f) {
-            return f->file->path == returned->path;
+        auto it = find_if(open_files.begin(), open_files.end(), [returned, owner](const opened_file *f) {
+            auto it = find(f->owners.begin(), f->owners.end(), owner);
+            return f->file->path == returned->path && it != f->owners.end();
         });
-        if (it != open_files.end()) {
-            opened_file* file = *it;
+        if (it != open_files.end() && (*it)->mode != "R") {
+            opened_file *file = *it;
             if (start > file->file_mem.size()) {
-                cout << "start size too large\n";
-                return;
+                msg = "start size too large\n";
+                return msg;
             }
             file->dirty = true;
             string content;
@@ -385,54 +393,170 @@ void move_within_file(File* root, File* cwd, vector<opened_file*> open_files, ve
                 content.push_back(file->file_mem[i]);
                 file->file_mem[i] = '\0';
             }
-
             vector<char> new_file_mem = file->file_mem;
             if (target + content.size() > new_file_mem.size()) {
                 new_file_mem.resize(target + content.size());
             }
-            int file_size_on_disk = file->file_mem.size() > 0 ? file->file_mem.size() : 1;
-            int new_size = new_file_mem.size() > 0 ? new_file_mem.size() : 1;
-
-            int occupied_blocks = ceil(((double) file_size_on_disk / BLOCK_SIZE));
-            int required_blocks = ceil((double) new_size / BLOCK_SIZE);
-            int new_blocks_required = required_blocks - occupied_blocks;
-
-
-            while (new_blocks_required--) {
-                allocate_memory(file->file, free_blocks);
+            int file_size_on_disk = file->file_mem.size();
+            if (new_file_mem.size() / BLOCK_SIZE > file_size_on_disk / BLOCK_SIZE) {
+                int new_blocks_required =
+                        ceil((double) new_file_mem.size() / BLOCK_SIZE) - file_size_on_disk / BLOCK_SIZE;
+                while (new_blocks_required--) {
+                    allocate_memory(file->file, free_blocks);
+                }
             }
             for (int i = target; i < target + content.size(); i++) {
                 new_file_mem[i] = content[i - target];
             }
             file->file_mem = new_file_mem;
+            msg = "Moved within file " + path;
         } else {
-            cout << "file is not open or file is not open in read mode\n";
+            msg = "file is not open or file is not open in read mode\n";
         }
     } else {
-        cout << "file not found\n";
+        msg = "file not found\n";
     }
+    return msg;
 }
 
-void print_memory_map(File* root, int depth) {
+string print_memory_map(File *root, int depth) {
+    string msg;
     if (root == nullptr) {
-        return;
+        return "No hierarchy";
     }
 
     for (int i = 0; i < depth; ++i) {
-        cout << "-";
+        msg += "-";
     }
-    cout << root->name;
-    cout << ", blocks = {";
+    msg += root->name;
+    msg += ", blocks = {";
     for (int i = root->start; i < root->start + root->length; i++) {
-        cout << " " << i;
+        msg += " " + to_string(i);
     }
-    for (auto&e: root->extents) {
+    for (auto &e: root->extents) {
         for (int i = e.first; i < e.first + e.second; ++i) {
-            cout << " " << i;
+            msg += " " + to_string(i);
         }
     }
-    cout << " }\n";
-    for (auto&c: root->children) {
-        print_memory_map(c, depth + 1);
+    msg += " }\n";
+    for (auto &c: root->children) {
+        msg += print_memory_map(c, depth + 1);
     }
+    return msg;
+}
+
+void save_state(File *root, vector<vector<char>> &disk, vector<bool> &free_blocks) {
+    serialize_lock.lock();
+    ofstream directory_file_out("directory.txt", ios_base::trunc);
+    serialize(root, directory_file_out);
+    directory_file_out.close();
+    ofstream disk_file_out("disk.dat", ios_base::trunc);
+    write_disk_to_file(disk, free_blocks, disk_file_out);
+    disk_file_out.close();
+    serialize_lock.unlock();
+}
+
+void thread_function(int socket_id, string owner, File *root, File *cwd, vector<vector<char>> &disk,
+                     vector<bool> &free_blocks,
+                     vector<opened_file *> &open_files) {
+    char buffer[BUFFER_SIZE] = {0};
+    string input;
+    string msg = " ";
+    while (input != "quit") {
+        if (read(socket_id, buffer, BUFFER_SIZE) < 0) {
+            perror("error reading");
+        }
+        input = buffer;
+        string command;
+        string path;
+        size_t pos = 0;
+        int offset = 0;
+        pos = input.find(' ');
+        command = input.substr(0, pos);
+        input.erase(0, pos + 1);
+        if (command == "ls") {
+            msg = ls(cwd);
+        } else if (command == "touch") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            msg = touch(root, cwd, free_blocks, path);
+        } else if (command == "rm") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            msg = rm(root, cwd, free_blocks, path, open_files);
+        } else if (command == "mkdir") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            msg = mkdir(root, cwd, path);
+        } else if (command == "cd") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            cwd = cd(root, cwd, path);
+            msg = "Success";
+        } else if (command == "mv") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            input.erase(0, pos + 1);
+            string path2 = input;
+            msg = mv(root, cwd, path, path2, open_files);
+        } else if (command == "open") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            input.erase(0, pos + 1);
+            string mode = input;
+            msg = open_file(root, cwd, open_files, disk, path, mode, owner);
+        } else if (command == "close") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            msg = close_file(path, root, cwd, open_files, disk, owner);
+        } else if (command == "write") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            input.erase(0, pos + 1);
+            pos = input.find(' ');
+            offset = stoi(input.substr(0, pos));
+            input.erase(0, pos + 1);
+            msg = write(root, cwd, open_files, disk, free_blocks, path, offset, input, owner);
+        } else if (command == "read") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            input.erase(0, pos + 1);
+            pos = input.find(' ');
+            offset = stoi(input.substr(0, pos));
+            input.erase(0, pos + 1);
+            msg = read(root, cwd, open_files, path, offset, stoi(input));
+        } else if (command == "mvwf") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            input.erase(0, pos + 1);
+            pos = input.find(' ');
+            offset = stoi(input.substr(0, pos));
+            input.erase(0, pos + 1);
+            pos = input.find(' ');
+            int len = stoi(input.substr(0, pos));
+            input.erase(0, pos + 1);
+            msg = move_within_file(root, cwd, open_files, disk, free_blocks, path,
+                                   offset, len, stoi(input), owner);
+        } else if (command == "truncate") {
+            pos = input.find(' ');
+            path = input.substr(0, pos);
+            input.erase(0, pos + 1);
+            int maxsize = stoi(input);
+            msg = truncate(root, cwd, open_files, disk, free_blocks, path, maxsize, owner);
+        } else if (command == "pmm") {
+            msg = print_memory_map(root);
+            path = "";
+        } else if (command != "quit") {
+            msg = "No such command";
+        }
+        send(socket_id, msg.data(), msg.size(), 0);
+        memset(buffer, 0, BUFFER_SIZE);
+        msg = " ";
+    }
+    for (auto &f: open_files) {
+        if (find(f->owners.begin(), f->owners.end(), owner) != f->owners.end()) {
+            close_file(f->file->path, root, cwd, open_files, disk, owner);
+        }
+    }
+    save_state(root, disk, free_blocks);
 }
