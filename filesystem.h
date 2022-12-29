@@ -170,7 +170,7 @@ File *chdir(const string &path, File *parent) {
     return found;
 }
 
-void move(const string &path1, const string &path2, File *parent1, File *parent2, vector<opened_file *> &open_files) {
+void move(const string &path1, const string &path2, File *parent1, File *parent2) {
     vector<string> tokenized_path_1 = tokenize(path1, '/');
     string name1 = tokenized_path_1[tokenized_path_1.size() - 1];
     tokenized_path_1.pop_back();
@@ -199,13 +199,6 @@ void move(const string &path1, const string &path2, File *parent1, File *parent2
                 return (*it)->name == f->name;
             });
             if (it2 == parent2->children.end()) {
-                File *to_move = *it;
-                auto it1 = find_if(open_files.begin(), open_files.end(), [to_move](const opened_file *f) {
-                    return f->file->path == to_move->path;
-                });
-                if (it1 != open_files.end()) {
-                    return;
-                }
                 (*it)->path = (parent2->path == "/" ? "" : parent2->path) + "/" + (*it)->name;
                 parent2->children.push_back(*it);
                 parent1->children.erase(it);
@@ -242,7 +235,7 @@ File *get_file(const string &path, File *parent) {
     }
 }
 
-File *delete_file(const string &path, File *parent, vector<opened_file *> &open_files) {
+File *delete_file(const string &path, File *parent) {
     vector<string> tokenized_path = tokenize(path, '/');
     string name = tokenized_path[tokenized_path.size() - 1];
     tokenized_path.pop_back();
@@ -261,12 +254,6 @@ File *delete_file(const string &path, File *parent, vector<opened_file *> &open_
             cout << name << ": No such file\n";
         } else {
             File *to_remove = *it;
-            auto it1 = find_if(open_files.begin(), open_files.end(), [to_remove](const opened_file *f) {
-                return f->file->path == to_remove->path;
-            });
-            if (it1 != open_files.end()) {
-                return nullptr;
-            }
             parent->children.erase(it);
             return to_remove;
         }
