@@ -165,7 +165,7 @@ string mkdir(File *root, File *cwd, string path) {
     mkdir_lock.lock();
     add_file(path, path[0] == '/' ? root : cwd, DIR, nullptr);
     mkdir_lock.unlock();
-    return path + " directory created";
+    return path + " directory created\n";
 }
 
 string touch(File *root, File *cwd, vector<bool> &free_blocks, string path) {
@@ -179,7 +179,7 @@ string touch(File *root, File *cwd, vector<bool> &free_blocks, string path) {
         msg = "Error creating file";
     }
     creation_lock.unlock();
-    return msg;
+    return msg + "\n";
 }
 
 
@@ -200,10 +200,10 @@ string rm(File *root, File *cwd, vector<bool> &free_blocks, string path, vector<
         }
         delete to_delete;
     } else {
-        msg = "File is open, Cannot be removed\n";
+        msg = "File is open, Cannot be removed";
     }
     rm_lock.unlock();
-    return msg;
+    return msg + "\n";
 }
 
 string mv(File *root, File *cwd, string path1, string path2, vector<opened_file *> &opened_files) {
@@ -217,7 +217,7 @@ string mv(File *root, File *cwd, string path1, string path2, vector<opened_file 
         return a->file->path == file->path;
     }) == opened_files.end()) {
         move(path1, path2, parent1, parent2);
-        msg = path1 + " moved to " + path2;
+        msg = path1 + " moved to " + path2 + "\n";
     } else {
         msg = "File is open, Cannot be moved\n";
     }
@@ -265,7 +265,7 @@ string open_file(File *root, File *cwd, vector<opened_file *> &open_files, const
         }
     }
     opening_mutex.unlock();
-    return msg;
+    return msg + "\n";
 }
 
 string close_file(string path, File *root, File *cwd, vector<opened_file *> &open_files, vector<vector<char>> &disk,
@@ -329,7 +329,7 @@ string write(File *root, File *cwd, vector<opened_file *> &open_files, vector<ve
              vector<bool> &free_blocks, string path, int start, string content, string owner) {
     string msg;
     if (start < 0) {
-        return "Start is negative";
+        return "Start is negative\n";
     }
     File *returned = get_file(path, path[0] == '/' ? root : cwd);
     if (returned) {
@@ -341,8 +341,8 @@ string write(File *root, File *cwd, vector<opened_file *> &open_files, vector<ve
             opened_file *file = *it;
             file->dirty = true;
             if (start > file->file_mem.size()) {
-                msg = "start size too large\n";
-                return msg;
+                msg = "start size too large";
+                return msg + "\n";
             }
             vector<char> new_file_mem = file->file_mem;
             if (start + content.size() > new_file_mem.size()) {
@@ -362,12 +362,12 @@ string write(File *root, File *cwd, vector<opened_file *> &open_files, vector<ve
             file->file_mem = new_file_mem;
             msg = "Successfully written at " + path;
         } else {
-            msg = "file is not open or files is not open in write mode\n";
+            msg = "file is not open or files is not open in write mode";
         }
     } else {
-        msg = "file not found\n";
+        msg = "file not found";
     }
-    return msg;
+    return msg + "\n";
 }
 
 string truncate(File *root, File *cwd, vector<opened_file *> open_files, vector<vector<char>> &disk,
@@ -394,19 +394,19 @@ string truncate(File *root, File *cwd, vector<opened_file *> open_files, vector<
                 msg = "New size given is more than file size";
             }
         } else {
-            msg = "File is not open in W mode. Please open file in W mode to truncate\n";
+            msg = "File is not open in W mode. Please open file in W mode to truncate";
         }
     } else {
-        msg = "file not found\n";
+        msg = "file not found";
     }
-    return msg;
+    return msg + "\n";
 }
 
 string move_within_file(File *root, File *cwd, vector<opened_file *> open_files, vector<vector<char>> &disk,
                         vector<bool> &free_blocks, string path, int start, int size, int target, string owner) {
     string msg;
     if (start < 0) {
-        return "Start is negative";
+        return "Start is negative\n";
     }
 
     File *returned = get_file(path, path[0] == '/' ? root : cwd);
@@ -432,7 +432,7 @@ string move_within_file(File *root, File *cwd, vector<opened_file *> open_files,
             }
             file->file_mem.erase(remove(file->file_mem.begin(), file->file_mem.end(), '\0'), file->file_mem.end());
 
-            msg = "Moved within file " + path;
+            msg = "Moved within file " + path + "\n";
         } else {
             msg = "file is not open in W mode. Please open file in W mode to move within file\n";
         }
@@ -461,11 +461,11 @@ string print_memory_map(File *root, int depth) {
             msg += " " + to_string(i);
         }
     }
-    msg += " }\n";
+    msg += " }";
     for (auto &c: root->children) {
         msg += print_memory_map(c, depth + 1);
     }
-    return msg;
+    return msg + "\n";
 }
 
 void save_state(File *root, vector<vector<char>> &disk, vector<bool> &free_blocks) {
@@ -484,17 +484,18 @@ void thread_function(int socket_id, string owner, File *root, vector<vector<char
                      vector<opened_file *> &open_files) {
     char buffer[BUFFER_SIZE] = {0};
     string input;
-    string msg = " ";
+    string msg;
     File *cwd = root;
     while (input != "quit") {
-        if (read(socket_id, buffer, BUFFER_SIZE) < 0) {
+        if (!read(socket_id, buffer, BUFFER_SIZE)) {
             perror("error reading");
+            break;
         }
         input = buffer;
         string command;
         string path;
-        size_t pos = 0;
-        int offset = 0;
+        size_t pos;
+        int offset;
         pos = input.find(' ');
         command = input.substr(0, pos);
         input.erase(0, pos + 1);
@@ -516,7 +517,6 @@ void thread_function(int socket_id, string owner, File *root, vector<vector<char
             pos = input.find(' ');
             path = input.substr(0, pos);
             cwd = cd(root, cwd, path);
-            msg = "Success";
         } else if (command == "mv") {
             pos = input.find(' ');
             path = input.substr(0, pos);
@@ -575,9 +575,10 @@ void thread_function(int socket_id, string owner, File *root, vector<vector<char
         } else {
             msg = "No such command!";
         }
+        msg += cwd->path + ">";
         send(socket_id, msg.data(), msg.size(), 0);
         memset(buffer, 0, BUFFER_SIZE);
-        msg = " ";
+        msg = "";
     }
     for (auto &f: open_files) {
         if (find(f->owners.begin(), f->owners.end(), owner) != f->owners.end()) {
